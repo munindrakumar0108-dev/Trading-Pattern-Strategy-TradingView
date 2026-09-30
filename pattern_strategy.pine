@@ -1,0 +1,194 @@
+//@version=5
+strategy("Candlestick Pattern Strategy - Multi Pattern Detector", overlay=true, margin_long=100, margin_short=100)
+
+// ==================== INPUT PARAMETERS ====================
+riskPercent = input.float(2.0, title="Risk % per Trade", minval=0.1, maxval=10)
+tp1Ratio = input.float(1.5, title="TP1 Risk:Reward Ratio", minval=0.5)
+tp2Ratio = input.float(2.5, title="TP2 Risk:Reward Ratio", minval=1.0)
+tp3Ratio = input.float(4.0, title="TP3 Risk:Reward Ratio", minval=1.5)
+
+enableBullish = input(true, title="Enable Bullish Patterns")
+enableBearish = input(true, title="Enable Bearish Patterns")
+useATR = input(true, title="Use ATR for SL (else use Low/High)")
+atrLength = input(14, title="ATR Length", minval=5)
+atrMultiplier = input(1.5, title="ATR Multiplier for SL", minval=0.5)
+
+// ==================== UTILITY FUNCTIONS ====================
+
+// ATR Calculation
+atrValue = ta.atr(atrLength)
+
+// Check if candle is bullish
+isBullish() => close > open
+
+// Check if candle is bearish
+isBearish() => close < open
+
+// Body size
+bodySize() => math.abs(close - open)
+
+// Upper shadow/wick
+upperWick() => high - math.max(open, close)
+
+// Lower shadow/wick
+lowerWick() => math.min(open, close) - low
+
+// ==================== BULLISH PATTERN DETECTION ====================
+
+// 1. BULLISH ENGULFING
+bullishEngulfing() =>
+    isBearish()[1] and isBullish() and
+    open < close[1] and close > open[1] and
+    bodySize() > bodySize()[1]
+
+// 2. BULLISH HARAMI
+bullishHarami() =>
+    isBearish()[1] and isBullish() and
+    open > close[1] and close < open[1] and
+    bodySize() < bodySize()[1] and
+    open < high[1] and close > low[1]
+
+// 3. MORNING STAR (3 candle)
+morningStar() =>
+    isBearish()[2] and bodySize()[2] > bodySize()[1] * 0.5 and
+    bodySize()[1] < bodySize()[2] * 0.5 and
+    isBullish() and close > (open[2] + close[2]) / 2
+
+// 4. BULLISH PIERCING LINE
+bullishPiercing() =>
+    isBearish()[1] and isBullish() and
+    open < low[1] and close > (open[1] + close[1]) / 2 and close < open[1]
+
+// 5. THREE INSIDE UP
+threeInsideUp() =>
+    isBearish()[2] and bullishHarami()[1] and isBullish() and
+    close > high[1]
+
+// 6. ASCENDING TRIANGLE (Continuation)
+ascendingTriangle() =>
+    high == high[1] and low > low[1] and
+    close > open and bodySize() > bodySize()[1]
+
+// 7. BULLISH RECTANGLE (Continuation)
+bullishRectangle() =>
+    close > open and
+    high == high[1] and low == low[1] and
+    bodySize() > bodySize()[1] * 0.3
+
+// ==================== BEARISH PATTERN DETECTION ====================
+
+// 1. BEARISH ENGULFING
+bearishEngulfing() =>
+    isBullish()[1] and isBearish() and
+    open > close[1] and close < open[1] and
+    bodySize() > bodySize()[1]
+
+// 2. BEARISH HARAMI
+bearishHarami() =>
+    isBullish()[1] and isBearish() and
+    open < close[1] and close > open[1] and
+    bodySize() < bodySize()[1] and
+    open > low[1] and close < high[1]
+
+// 3. EVENING STAR (3 candle)
+eveningStar() =>
+    isBullish()[2] and bodySize()[2] > bodySize()[1] * 0.5 and
+    bodySize()[1] < bodySize()[2] * 0.5 and
+    isBearish() and close < (open[2] + close[2]) / 2
+
+// 4. BEARISH PIERCING LINE
+bearishPiercing() =>
+    isBullish()[1] and isBearish() and
+    open > high[1] and close < (open[1] + close[1]) / 2 and close > open[1]
+
+// 5. THREE INSIDE DOWN
+threeInsideDown() =>
+    isBullish()[2] and bearishHarami()[1] and isBearish() and
+    close < low[1]
+
+// 6. DESCENDING TRIANGLE (Continuation)
+descendingTriangle() =>
+    low == low[1] and high < high[1] and
+    close < open and bodySize() > bodySize()[1]
+
+// 7. BEARISH RECTANGLE (Continuation)
+bearishRectangle() =>
+    close < open and
+    high == high[1] and low == low[1] and
+    bodySize() > bodySize()[1] * 0.3
+
+// ==================== PATTERN GROUPING ====================
+
+bullishPatterns = 
+    (enableBullish and bullishEngulfing()) or
+    (enableBullish and bullishHarami()) or
+    (enableBullish and morningStar()) or
+    (enableBullish and bullishPiercing()) or
+    (enableBullish and threeInsideUp()) or
+    (enableBullish and ascendingTriangle()) or
+    (enableBullish and bullishRectangle())
+
+bearishPatterns = 
+    (enableBearish and bearishEngulfing()) or
+    (enableBearish and bearishHarami()) or
+    (enableBearish and eveningStar()) or
+    (enableBearish and bearishPiercing()) or
+    (enableBearish and threeInsideDown()) or
+    (enableBearish and descendingTriangle()) or
+    (enableBearish and bearishRectangle())
+
+// ==================== ENTRY AND EXIT LOGIC ====================
+
+// LONG ENTRY
+if bullishPatterns and strategy.position_size == 0
+    slLong = useATR ? close - (atrValue * atrMultiplier) : low
+    riskLong = close - slLong
+    tp1Long = close + (riskLong * tp1Ratio)
+    tp2Long = close + (riskLong * tp2Ratio)
+    tp3Long = close + (riskLong * tp3Ratio)
+    
+    strategy.entry("LONG", strategy.long)
+    strategy.exit("TP1", "LONG", limit=tp1Long)
+    strategy.exit("TP2", "LONG", limit=tp2Long)
+    strategy.exit("TP3", "LONG", limit=tp3Long, stop=slLong)
+
+// SHORT ENTRY
+if bearishPatterns and strategy.position_size == 0
+    slShort = useATR ? close + (atrValue * atrMultiplier) : high
+    riskShort = slShort - close
+    tp1Short = close - (riskShort * tp1Ratio)
+    tp2Short = close - (riskShort * tp2Ratio)
+    tp3Short = close - (riskShort * tp3Ratio)
+    
+    strategy.entry("SHORT", strategy.short)
+    strategy.exit("TP1", "SHORT", limit=tp1Short)
+    strategy.exit("TP2", "SHORT", limit=tp2Short)
+    strategy.exit("TP3", "SHORT", limit=tp3Short, stop=slShort)
+
+// ==================== VISUALIZATION ====================
+
+// Bullish Pattern Markers (Green)
+plotshape(bullishPatterns, title="Bullish Pattern", style=shape.labelup, 
+    location=location.belowbar, color=color.new(color.green, 0), text="BUY")
+
+// Bearish Pattern Markers (Red)
+plotshape(bearishPatterns, title="Bearish Pattern", style=shape.labeldown, 
+    location=location.abovebar, color=color.new(color.red, 0), text="SELL")
+
+// Entry Price Line
+plot(strategy.position_size != 0 ? strategy.opentrades.entry_price(0) : na, 
+    title="Entry Price", color=color.blue, linewidth=2, style=plot.style_linebr)
+
+// ==================== DASHBOARD INFO ====================
+var infoText = ""
+if bullishPatterns
+    infoText := "🟢 BULLISH PATTERN DETECTED\nEntry: " + str.tostring(close, format.price)
+if bearishPatterns
+    infoText := "🔴 BEARISH PATTERN DETECTED\nEntry: " + str.tostring(close, format.price)
+
+f_dashboardInfo() =>
+    table.new(position.top_right, 1, 1, bgcolor=color.new(color.black, 80))
+    |> table.cell(_, 0, 0, text=infoText, text_color=color.white, text_size=size.small)
+
+if barstate.islast
+    f_dashboardInfo()
